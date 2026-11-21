@@ -1,1 +1,1 @@
-{"name":"game-matome-site","private":true,"scripts":{"build":"node build.mjs"},"type":"module","version":"0.1.0"}
+{"name":"game-matome-site","private":true,"scripts":{"build":"node build.mjs","start":"node server.mjs"},"type":"module","version":"0.1.0"}
