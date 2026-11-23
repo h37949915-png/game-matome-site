@@ -197,6 +197,7 @@ ${header(prefix)}
 ${body}
 </main>
 ${footer}
+<script defer src="/_vercel/insights/script.js"></script>
 </body>
 </html>
 `;
