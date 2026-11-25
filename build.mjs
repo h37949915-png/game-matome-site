@@ -1,6 +1,7 @@
 // ゲームまとめサイト 静的ビルドスクリプト（Node標準機能のみ・依存パッケージなし）
 // 使い方: node build.mjs
-// 原稿: content/articles.md（## 見出しで区切られた記事群）
+// 原稿: articles.md（## 見出しで区切られた記事群）
+// デザイン: style.src.css（Gemini生成デザインを統合したもの）を dist/style.css にコピー
 
 import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -11,10 +12,18 @@ import { fileURLToPath } from 'node:url';
 // ============================================================
 const SITE_NAME = 'ゲーム議事堂';
 
-const DATE = '2026-11-21';
-const DATE_LABEL = '2026年11月21日';
-
+// 記事メタ（原稿の並び順と対応）
 const SLUGS = [
+  'melty-blood-twi-lumina',
+  'dbd-terrifier',
+  'digimon-alysion-release',
+  'resleriana-atelier-service-end',
+  'mabinogi-mobile-denki-update',
+  'gbf-goldmoon-150',
+  'showa-american-story',
+  'makendo-1-2',
+  'bluearchive-publisher-transfer',
+  'gothic-1-remake-ps5',
   'umamusume-nfl',
   'zzz-ver34',
   'steam-machine',
@@ -28,6 +37,16 @@ const SLUGS = [
 ];
 
 const CATEGORIES = [
+  'eスポーツ',
+  '速報',
+  '速報',
+  '賛否',
+  '速報',
+  '知恵袋発掘',
+  '賛否',
+  '速報',
+  '賛否',
+  '賛否',
   '速報',
   '速報',
   '賛否',
@@ -40,27 +59,49 @@ const CATEGORIES = [
   '知恵袋発掘',
 ];
 
-// カテゴリごとの色とアイコン（一覧のラベル＆サムネイル代わりの色ブロック用）
-const CATEGORY_STYLE = {
-  '速報':       { color: '#c62828', grad: 'linear-gradient(135deg,#e53935,#8e1414)', icon: '⚡' },
-  '賛否':       { color: '#6a1b9a', grad: 'linear-gradient(135deg,#8e24aa,#4a116e)', icon: '⚖' },
-  'eスポーツ':  { color: '#1565c0', grad: 'linear-gradient(135deg,#1e88e5,#0d3f75)', icon: '🏆' },
-  'VTuber':     { color: '#d81b60', grad: 'linear-gradient(135deg,#ec407a,#8f103f)', icon: '🎤' },
-  'インディー': { color: '#00796b', grad: 'linear-gradient(135deg,#26a69a,#00473f)', icon: '🎮' },
-  'グッズ':     { color: '#2e7d32', grad: 'linear-gradient(135deg,#43a047,#17491a)', icon: '🛍' },
-  '知恵袋発掘': { color: '#ef6c00', grad: 'linear-gradient(135deg,#fb8c00,#8f4a00)', icon: '💡' },
+const DATES = [
+  '2026-11-25',
+  '2026-11-25',
+  '2026-11-25',
+  '2026-11-25',
+  '2026-11-25',
+  '2026-11-25',
+  '2026-11-24',
+  '2026-11-24',
+  '2026-11-24',
+  '2026-11-22',
+  '2026-11-21',
+  '2026-11-21',
+  '2026-11-21',
+  '2026-11-21',
+  '2026-11-21',
+  '2026-11-21',
+  '2026-11-21',
+  '2026-11-21',
+  '2026-11-21',
+  '2026-11-21',
+];
+
+// カテゴリ → Geminiデザインのタグ用クラス
+const CAT_CLASS = {
+  '速報': 'cat-sokuho',
+  '賛否': 'cat-sanpi',
+  'eスポーツ': 'cat-esports',
+  'VTuber': 'cat-vtuber',
+  'インディー': 'cat-indie',
+  'グッズ': 'cat-goods',
+  '知恵袋発掘': 'cat-chie',
 };
-const DEFAULT_STYLE = { color: '#555555', grad: 'linear-gradient(135deg,#757575,#333333)', icon: '📰' };
-const catStyle = (cat) => CATEGORY_STYLE[cat] ?? DEFAULT_STYLE;
+const catClass = (cat) => CAT_CLASS[cat] ?? '';
+const NAV_CATS = ['速報', '賛否', 'eスポーツ', 'VTuber', 'インディー', 'グッズ', '知恵袋発掘'];
 
 // ---------- 入力 ----------
 const root = dirname(fileURLToPath(import.meta.url));
 const srcPath = existsSync(join(root, 'articles.md'))
   ? join(root, 'articles.md')
-  : existsSync(join(root, 'content', 'articles.md'))
-    ? join(root, 'content', 'articles.md')
-    : join(root, '..', 'your_files', 'game-matome-trial-10-v4.md');
+  : join(root, 'content', 'articles.md');
 const source = readFileSync(srcPath, 'utf8');
+const cssSource = readFileSync(join(root, 'style.src.css'), 'utf8');
 
 // ---------- ユーティリティ ----------
 const esc = (s) =>
@@ -70,13 +111,18 @@ const inline = (s) =>
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/`([^`]+?)`/g, '<code>$1</code>');
 const plainText = (s) => s.replace(/[*`]/g, '').trim();
+const dateLabel = (d) => {
+  const [y, m, dd] = d.split('-').map(Number);
+  return `${y}年${m}月${dd}日`;
+};
+const dateShort = (d) => d.replace(/-/g, '/');
 
 // ---------- Markdown パース ----------
 // 冒頭のタイトル行（#）と説明文は記事ではないので、最初の ## 以前は捨てる。
 // ## = 記事タイトル / ### = 小見出し / > [埋め込み：〜] = 埋め込み枠 /
 // > それ以外 = 引用ボックス / --- = 記事区切り（無視）/
-// 「コメント」見出し配下で『〜』で始まる段落 = コメント風ボックス。
-// それ以外の『〜』で始まる段落 = 反応の声として引用風に表示。
+// 「コメント」見出し配下で『〜』で始まる段落 = コメント。
+// それ以外の『〜』で始まる段落 = 反応の声。
 function parseArticles(md) {
   const lines = md.split(/\r?\n/);
   const articles = [];
@@ -129,7 +175,7 @@ function parseArticles(md) {
       section = '';
       continue;
     }
-    if (!cur) continue; // 最初の ## より前は捨てる
+    if (!cur) continue;
     if (line.startsWith('### ')) {
       flushAll();
       const text = line.slice(4).trim();
@@ -160,198 +206,218 @@ const articles = parsed.map((a, i) => ({
   ...a,
   slug: SLUGS[i],
   category: CATEGORIES[i],
-  date: DATE,
-  dateLabel: DATE_LABEL,
+  date: DATES[i],
+  dateLabel: dateLabel(DATES[i]),
+  dateShort: dateShort(DATES[i]),
+  commentCount: a.blocks.filter((b) => b.type === 'comment').length,
 }));
 
-// ---------- HTML 部品 ----------
-const navCats = [...new Set(CATEGORIES)];
+// ---------- HTML 部品（Geminiデザインの構造に合わせる） ----------
 const header = (prefix) => `
 <header class="site-header">
-  <div class="header-inner">
-    <a class="site-logo" href="${prefix}index.html">${esc(SITE_NAME)}</a>
-    <nav class="cat-nav">
-      ${navCats.map((c) => `<a href="${prefix}index.html#cat-${encodeURIComponent(c)}" style="--cat:${catStyle(c).color}">${esc(c)}</a>`).join('')}
-    </nav>
+  <div class="header-top-bar">
+    <span>個人運営のゲームニュース・反応まとめブログ</span>
+    <div class="header-top-links">
+      <a href="${prefix}index.html#about">このサイトについて</a>
+    </div>
   </div>
-</header>`;
+  <div class="header-main">
+    <div>
+      <p class="site-title"><a href="${prefix}index.html">ゲーム<span>議事堂</span></a></p>
+      <p class="site-tagline">家庭用・PCゲーム・VTuber界隈の話題とネットの反応を記録するまとめブログ</p>
+    </div>
+  </div>
+</header>
+<nav class="category-nav" aria-label="カテゴリナビゲーション">
+  <ul>
+    <li><a href="${prefix}index.html">トップ</a></li>
+    ${NAV_CATS.map((c) => `<li><a href="${prefix}index.html#${catClass(c)}">${esc(c)}</a></li>`).join('')}
+  </ul>
+</nav>`;
 
-const footer = `
+const footer = (prefix) => `
 <footer class="site-footer">
-  <p>${esc(SITE_NAME)} ｜ ゲームの話題とネットの反応をまとめるサイト</p>
-  <p class="footer-note">掲載している反応は試作用のサンプルです。公開時は実ポストの埋め込みに差し替えます。</p>
+  <div class="footer-inner">
+    <div class="footer-links">
+      <a href="${prefix}index.html">トップページ</a>
+      <a href="${prefix}index.html#about">サイトについて</a>
+    </div>
+    <p class="footer-note">掲載している反応・コメントは試作用のサンプルです。公開運用時は実ポストの埋め込みに差し替えます。</p>
+    <p class="copyright">&copy; 2026 ${esc(SITE_NAME)} All Rights Reserved.</p>
+  </div>
 </footer>`;
 
-const page = ({ title, prefix, body, extraHead = '' }) => `<!DOCTYPE html>
+const sidebar = (prefix) => {
+  const latest = articles.slice(0, 5);
+  const counts = {};
+  for (const a of articles) counts[a.category] = (counts[a.category] ?? 0) + 1;
+  return `
+<aside class="sidebar-column">
+  <section class="sidebar-widget">
+    <h2 class="widget-title">■ 新着記事</h2>
+    <div class="widget-content">
+      <ol class="ranking-list">
+        ${latest.map((a, i) => `
+        <li>
+          <span class="rank-num${i < 3 ? ` top${i + 1}` : ''}">${i + 1}</span>
+          <div>
+            <a href="${prefix}articles/${a.slug}.html">${esc(a.title)}</a>
+            <span class="ranking-meta">${esc(a.category)} / ${a.commentCount}コメント</span>
+          </div>
+        </li>`).join('')}
+      </ol>
+    </div>
+  </section>
+
+  <section class="sidebar-widget">
+    <h2 class="widget-title">■ カテゴリ一覧</h2>
+    <div class="widget-content">
+      <ul class="side-cat-list">
+        ${NAV_CATS.map((c) => `<li><a href="${prefix}index.html#${catClass(c)}"><span>» ${esc(c)}</span><span class="side-cat-count">${counts[c] ?? 0}</span></a></li>`).join('')}
+      </ul>
+    </div>
+  </section>
+
+  <section class="sidebar-widget" id="about">
+    <h2 class="widget-title">■ サイト紹介</h2>
+    <div class="widget-content about-box">
+      <p><strong>${esc(SITE_NAME)}</strong>は、ゲームの発表や賛否が割れる話題を、ネットの反応と一緒にまとめる個人運営のブログです。</p>
+      <p>現在は試作版として公開中です。記事中の反応・コメントは、確認できた賛否を代表する試作用の声で、実在ポストの引用ではありません。運用が本格化する段階で、実ポストの埋め込みに差し替えていきます。</p>
+    </div>
+  </section>
+</aside>`;
+};
+
+const page = ({ title, prefix, body }) => `<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}｜${esc(SITE_NAME)}</title>
 <link rel="stylesheet" href="${prefix}style.css">
-${extraHead}
 </head>
 <body>
+<div class="site-wrapper">
 ${header(prefix)}
-<main>
 ${body}
-</main>
-${footer}
+${footer(prefix)}
+</div>
 <script defer src="/_vercel/insights/script.js"></script>
 </body>
 </html>
 `;
 
 // ---------- 記事本文の描画 ----------
-function renderBlocks(blocks) {
-  return blocks.map((b) => {
+// h3「ネットの反応」以降を反応セクション、h3「コメント」以降をコメント欄として描く
+function renderArticleBody(a) {
+  const parts = { main: [], reaction: [], comments: [] };
+  let mode = 'main';
+  for (const b of a.blocks) {
+    if (b.type === 'h3' && b.text.includes('ネットの反応')) { mode = 'reaction'; continue; }
+    if (b.type === 'h3' && b.text.includes('コメント')) { mode = 'comments'; continue; }
+    if (b.type === 'h3') { parts[mode].push(`<h2>${esc(b.text)}</h2>`); continue; }
+    parts[mode].push(b);
+  }
+
+  const renderInlineBlock = (b) => {
     switch (b.type) {
-      case 'h3':
-        return `<h2 class="section-title">${esc(b.text)}</h2>`;
       case 'embed':
-        return `<div class="embed-box"><span class="embed-tag">公式ポスト</span><p class="embed-title">${esc(b.text)}</p><p class="embed-note">ここに公式ポストが埋め込まれます（X埋め込み枠）</p></div>`;
+        return `<div class="x-embed-wrap" role="region" aria-label="Xの投稿埋め込み枠">
+  <div class="x-embed-header">
+    <div class="x-embed-author">
+      <div class="x-avatar-placeholder">公式</div>
+      <div><span class="x-author-name">公式ポスト</span></div>
+    </div>
+    <span class="x-logo-mark">X</span>
+  </div>
+  <p class="x-embed-text">${esc(b.text)}</p>
+  <div class="x-embed-footer"><span>ここに公式ポストが埋め込まれます（X埋め込み枠）</span></div>
+</div>`;
       case 'quote':
-        return `<blockquote class="quote-box">${inline(b.text)}</blockquote>`;
-      case 'comment':
-        return `<div class="comment-box"><span class="comment-avatar">💬</span><p>${inline(b.text)}</p></div>`;
+        return `<div class="entry-lead-quote">${inline(b.text)}</div>`;
       case 'voice':
-        return `<p class="voice">${inline(b.text)}</p>`;
+        return `<p>${inline(b.text)}</p>`;
+      case 'raw':
+        return b.text;
       default:
         return `<p>${inline(b.text)}</p>`;
     }
-  }).join('\n');
+  };
+
+  const mainHtml = parts.main.map(renderInlineBlock).join('\n');
+  const reactionBlocks = parts.reaction.filter((b) => typeof b !== 'string' || b);
+  const reactionHtml = reactionBlocks.length
+    ? `
+<section class="reaction-section" aria-label="ネットの反応">
+  <h2 class="section-bar">ネットの反応</h2>
+  <div class="reaction-thread">
+${reactionBlocks.map((b) => (typeof b === 'string' ? b : renderInlineBlock(b))).join('\n')}
+  </div>
+</section>`
+    : '';
+  const commentBlocks = parts.comments.filter((b) => b.type === 'comment');
+  const otherCommentBlocks = parts.comments.filter((b) => b.type !== 'comment');
+  const commentsHtml = `
+<section class="comments-section" id="comments" aria-label="コメント欄">
+  <h2 class="section-bar">この記事へのコメント（${commentBlocks.length}件）</h2>
+  <div class="comment-list">
+${commentBlocks.map((b, i) => `
+    <div class="comment-item">
+      <div class="comment-head">
+        <span class="comment-num">${i + 1}.</span>
+        <span class="comment-author">名無しさん</span>
+      </div>
+      <p class="comment-body">${inline(b.text.replace(/^『|』$/g, ''))}</p>
+    </div>`).join('')}
+${otherCommentBlocks.map((b) => (typeof b === 'string' ? b : renderInlineBlock(b))).join('\n')}
+  </div>
+</section>`;
+
+  return { mainHtml, reactionHtml, commentsHtml };
 }
-
-// ---------- スタイル ----------
-const CSS = `
-:root{
-  --red:#a5121d; --red-dark:#7c0d15; --ink:#22252a; --muted:#6b7280;
-  --line:#e7e5e4; --bg:#faf9f7; --card:#ffffff;
-}
-*{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%}
-body{margin:0;background:var(--bg);color:var(--ink);
-  font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
-  line-height:1.8;font-size:16px}
-a{color:inherit;text-decoration:none}
-main{max-width:860px;margin:0 auto;padding:0 14px 48px}
-
-/* ヘッダー */
-.site-header{background:linear-gradient(90deg,var(--red-dark),var(--red) 55%,#c1272d);
-  color:#fff;box-shadow:0 2px 10px rgba(124,13,21,.35);position:sticky;top:0;z-index:10}
-.header-inner{max-width:860px;margin:0 auto;padding:12px 14px 10px}
-.site-logo{display:inline-block;font-size:24px;font-weight:900;letter-spacing:.02em;line-height:1.2}
-.site-logo::before{content:"⚡ ";color:#ffd54d}
-.cat-nav{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
-.cat-nav a{font-size:12.5px;font-weight:700;background:rgba(255,255,255,.14);
-  border:1px solid rgba(255,255,255,.35);padding:2px 10px;border-radius:999px}
-.cat-nav a:hover{background:rgba(255,255,255,.3)}
-
-/* ヒーロー */
-.hero{padding:26px 4px 6px}
-.hero h1{font-size:26px;margin:0 0 6px;font-weight:900}
-.hero p{margin:0;color:var(--muted);font-size:14.5px}
-
-/* 一覧カード */
-.card-list{display:flex;flex-direction:column;gap:12px;margin-top:18px}
-.card{display:flex;gap:13px;align-items:stretch;background:var(--card);
-  border:1px solid var(--line);border-radius:14px;padding:13px 14px;
-  box-shadow:0 1px 4px rgba(0,0,0,.05);transition:transform .08s,box-shadow .08s}
-.card:hover{transform:translateY(-1px);box-shadow:0 5px 16px rgba(0,0,0,.1)}
-.card-thumb{flex:0 0 62px;border-radius:10px;display:flex;align-items:center;justify-content:center;
-  font-size:29px;color:#fff;min-height:86px}
-.card-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
-.card-meta{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
-.cat-label{display:inline-block;color:#fff;font-size:11.5px;font-weight:800;
-  padding:1px 9px;border-radius:999px;line-height:1.7}
-.card-title{font-weight:800;font-size:16.5px;line-height:1.5}
-.card-excerpt{font-size:13px;color:var(--muted);line-height:1.65;
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.card-arrow{align-self:center;font-size:24px;color:#c9c4c0;font-weight:700}
-
-/* 記事ページ */
-.article{background:var(--card);border:1px solid var(--line);border-radius:14px;
-  margin-top:20px;padding:24px 22px 10px;box-shadow:0 1px 4px rgba(0,0,0,.05)}
-.article-meta{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--muted)}
-.article-title{font-size:23px;line-height:1.5;font-weight:900;margin:10px 0 18px;
-  border-bottom:3px solid var(--red);padding-bottom:13px}
-.article-body p{margin:0 0 1.15em}
-.article-body .section-title{font-size:17.5px;font-weight:900;margin:1.7em 0 .8em;
-  padding:6px 12px;background:#fdf1f1;border-left:5px solid var(--red);border-radius:0 8px 8px 0}
-.article-body .voice{background:#fffaf0;border:1px solid #f3e2b8;border-radius:10px;
-  padding:9px 13px;font-size:15px}
-.embed-box{border:2px dashed #b6bcc7;border-radius:12px;background:#f7f9fc;
-  padding:16px;margin:0 0 1.3em;text-align:center;color:#4b5563}
-.embed-tag{display:inline-block;background:#1d9bf0;color:#fff;font-size:11.5px;font-weight:800;
-  padding:1px 10px;border-radius:999px;margin-bottom:7px}
-.embed-title{font-weight:800;margin:0 0 3px !important;color:#1f2937}
-.embed-note{font-size:12.5px;color:#8a93a3;margin:0 !important}
-.quote-box{margin:0 0 1.3em;padding:13px 16px;background:#f5f5f4;border-left:5px solid #a8a29e;
-  border-radius:0 10px 10px 0;font-size:15px}
-.comment-box{display:flex;gap:10px;background:#f4f8ff;border:1px solid #dbeafe;
-  border-radius:12px;padding:10px 13px;margin:0 0 10px}
-.comment-avatar{flex:0 0 auto;width:32px;height:32px;border-radius:50%;background:#dbeafe;
-  display:flex;align-items:center;justify-content:center;font-size:16px}
-.comment-box p{margin:0 !important;font-size:14.5px;line-height:1.7}
-
-/* 前後リンク */
-.pager{display:flex;gap:10px;align-items:stretch;margin:26px 0 16px;flex-wrap:wrap}
-.pager-link{flex:1 1 200px;border:1px solid var(--line);border-radius:10px;padding:9px 12px;background:#fcfcfb}
-.pager-link span{display:block;font-size:12px;color:var(--red);font-weight:800}
-.pager-link strong{display:block;font-size:13.5px;line-height:1.55;font-weight:700}
-.pager-link.next{text-align:right}
-.pager-top{align-self:center;font-size:13px;font-weight:800;color:var(--red);
-  border:1px solid var(--red);border-radius:999px;padding:5px 14px;white-space:nowrap}
-.pager-spacer{flex:1 1 200px}
-
-/* フッター */
-.site-footer{border-top:1px solid var(--line);background:#fff;margin-top:8px}
-.site-footer p{max-width:860px;margin:0 auto;padding:14px;font-size:13px;color:var(--muted)}
-.site-footer .footer-note{padding-top:0;font-size:12px}
-
-/* スマホ */
-@media (max-width:560px){
-  .site-logo{font-size:20px}
-  .hero h1{font-size:21px}
-  .card-thumb{flex-basis:48px;font-size:23px;min-height:74px}
-  .card-title{font-size:15px}
-  .article{padding:18px 15px 6px}
-  .article-title{font-size:19.5px}
-  body{font-size:15.5px}
-}
-`;
 
 // ---------- 出力 ----------
 const dist = join(root, 'dist');
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(join(dist, 'articles'), { recursive: true });
 
-// style.css
-writeFileSync(join(dist, 'style.css'), CSS, 'utf8');
+writeFileSync(join(dist, 'style.css'), cssSource, 'utf8');
 
 // 記事ページ
 articles.forEach((a, i) => {
-  const st = catStyle(a.category);
   const prev = articles[i - 1];
   const next = articles[i + 1];
-  const pager = `
-<nav class="pager">
-  ${prev ? `<a class="pager-link prev" href="${prev.slug}.html"><span>← 前の記事</span><strong>${esc(prev.title)}</strong></a>` : '<span class="pager-spacer"></span>'}
-  <a class="pager-top" href="../index.html">一覧へ</a>
-  ${next ? `<a class="pager-link next" href="${next.slug}.html"><span>次の記事 →</span><strong>${esc(next.title)}</strong></a>` : '<span class="pager-spacer"></span>'}
-</nav>`;
+  const { mainHtml, reactionHtml, commentsHtml } = renderArticleBody(a);
   const body = `
-<article class="article">
-  <div class="article-meta">
-    <span class="cat-label" style="background:${st.color}">${esc(a.category)}</span>
-    <time datetime="${a.date}">${a.dateLabel}</time>
-  </div>
-  <h1 class="article-title">${esc(a.title)}</h1>
-  <div class="article-body">
-${renderBlocks(a.blocks)}
-  </div>
-  ${pager}
-</article>`;
+<div class="breadcrumb">
+  <a href="../index.html">ホーム</a><span>&gt;</span><a href="../index.html#${catClass(a.category)}">${esc(a.category)}</a><span>&gt;</span>${esc(a.title)}
+</div>
+<div class="main-container">
+  <main class="content-column">
+    <article>
+      <header class="entry-header">
+        <div class="entry-meta">
+          <span class="cat-tag ${catClass(a.category)}">${esc(a.category)}</span>
+          <time datetime="${a.date}">${a.dateLabel}</time>
+        </div>
+        <h1 class="entry-title">${esc(a.title)}</h1>
+        <div class="entry-submeta">
+          <a href="#comments">コメント（${a.commentCount}件）へ移動 ▼</a>
+        </div>
+      </header>
+      <div class="entry-content">
+${mainHtml}
+      </div>
+      ${reactionHtml}
+      <nav class="prev-next-nav" aria-label="前後の記事">
+        ${prev ? `<div class="prev-next-box"><span class="prev-next-label">« 前の記事</span><a href="${prev.slug}.html">${esc(prev.title)}</a></div>` : '<div class="prev-next-box"></div>'}
+        ${next ? `<div class="prev-next-box is-next"><span class="prev-next-label">次の記事 »</span><a href="${next.slug}.html">${esc(next.title)}</a></div>` : '<div class="prev-next-box is-next"></div>'}
+      </nav>
+      ${commentsHtml}
+    </article>
+  </main>
+  ${sidebar('../')}
+</div>`;
   writeFileSync(
     join(dist, 'articles', `${a.slug}.html`),
     page({ title: a.title, prefix: '../', body }),
@@ -360,29 +426,53 @@ ${renderBlocks(a.blocks)}
 });
 
 // 一覧ページ
-const cards = articles.map((a) => {
-  const st = catStyle(a.category);
+const latestDate = articles[0].dateLabel;
+const seenCat = new Set();
+const items = articles.map((a) => {
+  const anchor = seenCat.has(a.category) ? '' : ` id="${catClass(a.category)}"`;
+  seenCat.add(a.category);
   const excerpt = a.excerpt.length > 110 ? a.excerpt.slice(0, 110) + '…' : a.excerpt;
   return `
-<a class="card" id="cat-${encodeURIComponent(a.category)}" href="articles/${a.slug}.html">
-  <span class="card-thumb" style="background:${st.grad}">${st.icon}</span>
-  <span class="card-main">
-    <span class="card-meta"><span class="cat-label" style="background:${st.color}">${esc(a.category)}</span><time datetime="${a.date}">${a.dateLabel}</time></span>
-    <span class="card-title">${esc(a.title)}</span>
-    <span class="card-excerpt">${esc(excerpt)}</span>
-  </span>
-  <span class="card-arrow">›</span>
-</a>`;
+<article class="article-item"${anchor}>
+  <div class="article-body">
+    <div class="article-meta">
+      <span class="cat-tag ${catClass(a.category)}">${esc(a.category)}</span>
+      <time datetime="${a.date}">${a.dateShort}</time>
+      <span class="comment-count">コメント(${a.commentCount})</span>
+    </div>
+    <h3 class="article-title"><a href="articles/${a.slug}.html">${esc(a.title)}</a></h3>
+    <p class="article-excerpt">${esc(excerpt)}</p>
+  </div>
+</article>`;
 }).join('');
 
+const pickup = articles.slice(0, 3);
 const indexBody = `
-<section class="hero">
-  <h1>${esc(SITE_NAME)}</h1>
-  <p>ゲームの発表・賛否・みんなの反応を、まとめて読める形でお届けします。</p>
-</section>
-<section class="card-list">
-${cards}
-</section>`;
+<div class="notice-bar">
+  <span class="notice-label">更新</span>
+  <span>${latestDate}更新：記事は全${articles.length}本です。掲載中の反応・コメントは試作用のサンプルです。</span>
+</div>
+<div class="main-container">
+  <main class="content-column">
+    <section class="pickup-box" aria-label="注目記事">
+      <h2 class="pickup-box-title">■ 本日の注目記事</h2>
+      <ul class="pickup-list">
+        ${pickup.map((a) => `<li><a href="articles/${a.slug}.html">» ${esc(a.title)}</a> <span class="pickup-cm">[${a.commentCount}コメ]</span></li>`).join('')}
+      </ul>
+    </section>
+    <h2 class="section-bar">
+      <span>新着記事一覧</span>
+      <span class="section-bar-sub">全${articles.length}件</span>
+    </h2>
+    <div class="article-list">
+${items}
+    </div>
+    <nav class="pagination" aria-label="ページ送り">
+      <span class="is-current">1</span>
+    </nav>
+  </main>
+  ${sidebar('')}
+</div>`;
 
 writeFileSync(
   join(dist, 'index.html'),
@@ -391,4 +481,4 @@ writeFileSync(
 );
 
 console.log(`ビルド完了: 記事 ${articles.length} 本 → dist/index.html, dist/articles/*.html, dist/style.css`);
-articles.forEach((a) => console.log(` - articles/${a.slug}.html [${a.category}] ${a.title}`));
+articles.forEach((a) => console.log(` - articles/${a.slug}.html [${a.category}] ${a.date} コメント${a.commentCount}件 ${a.title.slice(0, 30)}`));
